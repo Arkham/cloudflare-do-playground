@@ -69,22 +69,6 @@ curl -X POST http://localhost:8787/chat/send?room=lobby \
 curl http://localhost:8787/chat/messages?room=lobby
 ```
 
-#### Batcher Example
-
-```bash
-# Queue items to be batched (they'll be processed together after 10 seconds)
-curl -X POST http://localhost:8787/batcher?name=foo -d "Request 1"
-curl -X POST http://localhost:8787/batcher?name=foo -d "Request 2"
-curl -X POST http://localhost:8787/batcher?name=foo -d "Request 3"
-
-# Each request returns:
-# {"queued": 1}
-# {"queued": 2}
-# {"queued": 3}
-
-# After 10 seconds, the alarm fires and processes all items together
-```
-
 #### Chat Room Example (WebSocket)
 
 You can test WebSocket connections using a WebSocket client or browser console:
@@ -108,6 +92,31 @@ ws.onmessage = (event) => {
 };
 ```
 
+#### Batcher Example
+
+```bash
+# Batching mode: Queue items to be batched (they'll be processed together after 10 seconds)
+curl -X POST http://localhost:8787/batcher?name=foo -d "Request 1"
+curl -X POST http://localhost:8787/batcher?name=foo -d "Request 2"
+curl -X POST http://localhost:8787/batcher?name=foo -d "Request 3"
+
+# Debouncing mode: Send JSON with debounce flag (resets timer on each request)
+curl -X POST http://localhost:8787/batcher?name=bar \
+  -H "Content-Type: application/json" \
+  -d '{"debounce": true, "data": "Message 1"}'
+curl -X POST http://localhost:8787/batcher?name=bar \
+  -H "Content-Type: application/json" \
+  -d '{"debounce": true, "data": "Message 2"}'
+
+# Each request returns:
+# {"queued": 1, "debounce": false}
+# {"queued": 2, "debounce": true}
+# etc.
+
+# Batching mode: After 10 seconds from first request, alarm fires
+# Debouncing mode: After 10 seconds of silence, alarm fires
+```
+
 ## Available Scripts
 
 - `npm run dev` - Start development server
@@ -123,7 +132,7 @@ This playground includes three example Durable Objects:
 
 A simple counter demonstrating:
 
-- Persistent storage using `this.state.storage`
+- Persistent storage using `this.ctx.storage`
 - State management across requests
 - HTTP request handling
 
@@ -160,25 +169,50 @@ A request batcher demonstrating:
 
 **Endpoints:**
 
-- `POST /batcher?name=<name>` - Queue a request to be batched (send text in body)
+- `POST /batcher?name=<name>` - Queue a request to be batched
+  - Send plain text for batching mode
+  - Send JSON with `{"debounce": true, ...}` for debouncing mode
 
 **How it works:**
 
+The Batcher supports two modes:
+
+**Batching mode** (default):
+
 - When the first request arrives, an alarm is set for 10 seconds in the future
 - All subsequent requests within that 10-second window are added to the batch
-- After 10 seconds, the `alarm()` method is triggered automatically
-- The alarm processes all batched items together and clears the batch
+- After 10 seconds from the first request, the `alarm()` method is triggered automatically
 - This is useful for aggregating requests to external APIs to reduce API calls
+
+**Debouncing mode** (`debounce: true` in JSON payload):
+
+- Each new request resets the alarm to 10 seconds from now
+- The batch only processes after 10 seconds of silence (no new requests)
+- Useful for scenarios like search input where you want to wait for user to finish typing
+
+In both modes:
+
+- The alarm processes all batched items together and clears the batch
+- Items are stored persistently until processed
 
 **Example:**
 
 ```bash
-# Queue multiple items (each will be batched)
+# Batching mode: Queue multiple items (plain text or JSON without debounce flag)
 curl -X POST http://localhost:8787/batcher?name=foo -d "Item 1"
 curl -X POST http://localhost:8787/batcher?name=foo -d "Item 2"
 curl -X POST http://localhost:8787/batcher?name=foo -d "Item 3"
+# Processes after 10 seconds from first request
 
-# After 10 seconds, all items are processed together
+# Debouncing mode: Send with debounce flag
+curl -X POST http://localhost:8787/batcher?name=bar \
+  -H "Content-Type: application/json" \
+  -d '{"debounce": true, "data": "Item 1"}'
+curl -X POST http://localhost:8787/batcher?name=bar \
+  -H "Content-Type: application/json" \
+  -d '{"debounce": true, "data": "Item 2"}'
+# Processes after 10 seconds of silence
+
 # Check your worker logs to see the batch processing
 ```
 
@@ -187,15 +221,15 @@ curl -X POST http://localhost:8787/batcher?name=foo -d "Item 3"
 1. Create a new file in `packages/durable-objects/src/`:
 
 ```typescript
-export class MyDurableObject implements DurableObject {
-  private state: DurableObjectState;
+import { DurableObject } from "cloudflare:workers";
 
-  constructor(state: DurableObjectState, env: unknown) {
-    this.state = state;
+export class MyDurableObject extends DurableObject<Record<string, never>> {
+  constructor(ctx: DurableObjectState, env: Record<string, never>) {
+    super(ctx, env);
   }
 
   async fetch(request: Request): Promise<Response> {
-    // Your logic here
+    // Your logic here - access storage via this.ctx.storage
     return new Response("Hello from Durable Object!");
   }
 }
@@ -216,19 +250,18 @@ class_name = "MyDurableObject"
 script_name = "do-playground-worker"
 ```
 
-4. Update migration:
+4. Add new migration:
 
 ```toml
 [[ migrations ]]
-tag = "v2"  # increment version
-new_classes = ["Counter", "ChatRoom", "MyDurableObject"]
+tag = "v3"  # increment version from current
+new_classes = ["MyDurableObject"]
 ```
 
-5. Import and export in `packages/worker/src/index.ts`:
+5. Re-export in `packages/worker/src/index.ts`:
 
 ```typescript
-import { MyDurableObject } from "durable-objects";
-export { MyDurableObject };
+export { Counter, ChatRoom, Batcher, MyDurableObject } from "durable-objects";
 ```
 
 6. Add to Env interface and routing:

@@ -28,18 +28,33 @@ export class Batcher extends DurableObject<Record<string, never>> {
   async fetch(request: Request): Promise<Response> {
     this.count++;
 
-    // If there is no alarm currently set, set one for 10 seconds from now
-    // Any further POSTs in the next 10 seconds will be part of this batch.
-    const currentAlarm = await this.ctx.storage.getAlarm();
-    if (currentAlarm == null) {
+    // Parse the request body
+    const body = await request.text();
+    let debounce = false;
+
+    try {
+      const payload = JSON.parse(body);
+      debounce = payload.debounce === true;
+    } catch {
+      // If body is not JSON, treat it as plain text with debounce=false
+    }
+
+    // Handle alarm based on debounce setting
+    if (debounce) {
+      // Reset the alarm to 10 seconds from now on every request (debouncing)
       this.ctx.storage.setAlarm(Date.now() + 1000 * SECONDS);
+    } else {
+      // Only set alarm if there isn't one already (batching)
+      const currentAlarm = await this.ctx.storage.getAlarm();
+      if (currentAlarm == null) {
+        this.ctx.storage.setAlarm(Date.now() + 1000 * SECONDS);
+      }
     }
 
     // Add the request to the batch.
-    const body = await request.text();
     await this.ctx.storage.put(this.count.toString(), body);
 
-    return new Response(JSON.stringify({ queued: this.count }), {
+    return new Response(JSON.stringify({ queued: this.count, debounce }), {
       headers: {
         "content-type": "application/json;charset=UTF-8",
       },
