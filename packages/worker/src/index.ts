@@ -1,9 +1,11 @@
-export { Counter, ChatRoom, Batcher } from "durable-objects";
+import type { RateLimiter } from "durable-objects";
+export { Counter, ChatRoom, Batcher, RateLimiter } from "durable-objects";
 
 interface Env {
   COUNTER: DurableObjectNamespace;
   CHAT_ROOM: DurableObjectNamespace;
   BATCHER: DurableObjectNamespace;
+  RATE_LIMITER: DurableObjectNamespace<RateLimiter>;
 }
 
 export default {
@@ -33,6 +35,14 @@ export default {
       return stub.fetch(request);
     }
 
+    // Route to RateLimiter Durable Object
+    if (url.pathname.startsWith("/rate-limit")) {
+      const ip = request.headers.get("CF-Connecting-IP") || "default-ip";
+      const id = env.RATE_LIMITER.idFromName(ip);
+      const stub = env.RATE_LIMITER.get(id);
+      return stub.fetch(request);
+    }
+
     // Default response with usage instructions
     return new Response(
       JSON.stringify(
@@ -53,6 +63,11 @@ export default {
             batcher: {
               queue: "POST /batcher?name=<batcher_name> (with text body)",
               description: "Batches requests for 10 seconds before processing",
+            },
+            rateLimit: {
+              check: "GET /rate-limit",
+              description:
+                "Token bucket rate limiter based on client IP (10,000 token capacity, 1ms per request)",
             },
           },
         },

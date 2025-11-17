@@ -117,6 +117,25 @@ curl -X POST http://localhost:8787/batcher?name=bar \
 # Debouncing mode: After 10 seconds of silence, alarm fires
 ```
 
+#### Rate Limiter Example
+
+```bash
+# Make a request (will be allowed if tokens available)
+curl http://localhost:8787/rate-limit
+
+# Success response:
+# {"success":true,"message":"Request allowed - upstream resource would be called here"}
+
+# Make multiple requests rapidly to trigger rate limiting
+for i in {1..100}; do
+  curl http://localhost:8787/rate-limit
+  sleep 0.01
+done
+
+# Eventually you'll see rate limited responses:
+# {"error":"Rate limit exceeded","retry_after_ms":1}
+```
+
 ## Available Scripts
 
 - `npm run dev` - Start development server
@@ -126,7 +145,7 @@ curl -X POST http://localhost:8787/batcher?name=bar \
 
 ## Durable Objects
 
-This playground includes three example Durable Objects:
+This playground includes four example Durable Objects:
 
 ### 1. Counter
 
@@ -216,6 +235,72 @@ curl -X POST http://localhost:8787/batcher?name=bar \
 # Check your worker logs to see the batch processing
 ```
 
+### 4. RateLimiter
+
+A token bucket rate limiter demonstrating:
+
+- Alarm functionality for periodic token refills
+- Per-IP rate limiting using Durable Object instances
+- Token bucket algorithm implementation
+- Automatic state management with alarms
+
+**Endpoints:**
+
+- `GET /rate-limit` - Check rate limit and consume a token
+
+**How it works:**
+
+The RateLimiter implements a token bucket algorithm:
+
+- Each client IP gets its own Durable Object instance (identified by IP address)
+- Token bucket capacity: 10,000 tokens
+- Token consumption rate: 1 millisecond per request
+- Token refill: 5,000 tokens every 5 seconds (via alarms)
+
+**Token Bucket Algorithm:**
+
+1. Initially, each IP has 10,000 tokens available
+2. Each request consumes 1 token
+3. If tokens are available, the request is allowed (returns 200)
+4. If no tokens are available, the request is rate-limited (returns 429)
+5. An alarm periodically refills tokens (adds 5,000 tokens every 5 seconds, up to capacity)
+6. The alarm automatically reschedules itself to keep refilling tokens
+
+**Example:**
+
+```bash
+# Make a request (will be allowed if tokens available)
+curl http://localhost:8787/rate-limit
+
+# Success response (200):
+# {
+#   "success": true,
+#   "message": "Request allowed - upstream resource would be called here"
+# }
+
+# Rate limited response (429):
+# {
+#   "error": "Rate limit exceeded",
+#   "retry_after_ms": 1
+# }
+
+# Make multiple requests rapidly to test rate limiting
+for i in {1..100}; do curl http://localhost:8787/rate-limit; echo; done
+
+# Try again within 5 seconds to see rate limiting kick in
+for i in {1..100}; do curl http://localhost:8787/rate-limit; echo; done
+```
+
+**Configuration:**
+
+You can adjust the rate limiting parameters by modifying the static constants in `rate-limiter.ts`:
+
+```typescript
+static readonly milliseconds_per_request = 10;      // Time cost per request
+static readonly milliseconds_for_updates = 5000;   // Refill interval
+static readonly capacity = 100;                  // Maximum tokens
+```
+
 ## Creating New Durable Objects
 
 1. Create a new file in `packages/durable-objects/src/`:
@@ -254,14 +339,20 @@ script_name = "do-playground-worker"
 
 ```toml
 [[ migrations ]]
-tag = "v3"  # increment version from current
+tag = "v4"  # increment version from current (v3 is RateLimiter)
 new_classes = ["MyDurableObject"]
 ```
 
 5. Re-export in `packages/worker/src/index.ts`:
 
 ```typescript
-export { Counter, ChatRoom, Batcher, MyDurableObject } from "durable-objects";
+export {
+  Counter,
+  ChatRoom,
+  Batcher,
+  RateLimiter,
+  MyDurableObject,
+} from "durable-objects";
 ```
 
 6. Add to Env interface and routing:
