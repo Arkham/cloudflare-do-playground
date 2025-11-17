@@ -1,0 +1,28 @@
+name = "do-playground-worker"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+[[ durable_objects.bindings ]]
+name = "COUNTER"
+class_name = "Counter"
+script_name = "do-playground-worker"
+
+[[ durable_objects.bindings ]]
+name = "CHAT_ROOM"
+class_name = "ChatRoom"
+script_name = "do-playground-worker"
+
+[[ durable_objects.bindings ]]
+name = "BATCHER"
+class_name = "Batcher"
+script_name = "do-playground-worker"
+
+[[ migrations ]]
+tag = "v1"
+new_classes = ["Counter", "ChatRoom"]
+
+[[ migrations ]]
+tag = "v2"
+new_classes = ["Batcher"]
+
