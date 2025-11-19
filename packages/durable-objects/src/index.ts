@@ -3,3 +3,4 @@ export { ChatRoom } from "./chat-room";
 export { Batcher } from "./batcher";
 export { RateLimiter } from "./rate-limiter";
 export { Location } from "./location";
+export { Session } from "./session";

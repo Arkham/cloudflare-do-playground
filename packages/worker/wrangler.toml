@@ -28,6 +28,11 @@ name = "LOCATION"
 class_name = "Location"
 script_name = "do-playground-worker"
 
+[[ durable_objects.bindings ]]
+name = "SESSION"
+class_name = "Session"
+script_name = "do-playground-worker"
+
 [[ migrations ]]
 tag = "v1"
 new_sqlite_classes = ["Counter", "ChatRoom"]
@@ -43,4 +48,8 @@ new_sqlite_classes = ["RateLimiter"]
 [[ migrations ]]
 tag = "v4"
 new_sqlite_classes = ["Location"]
+
+[[ migrations ]]
+tag = "v5"
+new_sqlite_classes = ["Session"]
 

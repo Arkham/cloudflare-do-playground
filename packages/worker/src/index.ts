@@ -5,6 +5,7 @@ export {
   Batcher,
   RateLimiter,
   Location,
+  Session,
 } from "durable-objects";
 
 interface Env {
@@ -13,6 +14,7 @@ interface Env {
   BATCHER: DurableObjectNamespace;
   RATE_LIMITER: DurableObjectNamespace<RateLimiter>;
   LOCATION: DurableObjectNamespace;
+  SESSION: DurableObjectNamespace;
 }
 
 export default {
@@ -57,6 +59,14 @@ export default {
       return stub.fetch(request);
     }
 
+    // Route to Session Durable Object
+    if (url.pathname.startsWith("/session")) {
+      const sessionId = url.searchParams.get("id") || "default";
+      const id = env.SESSION.idFromName(sessionId);
+      const stub = env.SESSION.get(id);
+      return stub.fetch(request);
+    }
+
     // Default response with usage instructions
     return new Response(
       JSON.stringify(
@@ -87,6 +97,13 @@ export default {
               check: "GET /location",
               description:
                 "Demonstrates in-memory state. Tracks location across requests until DO is evicted from memory.",
+            },
+            session: {
+              set: "POST /session/set?id=<session_id> (with JSON body {key, value})",
+              get: "GET /session/get?id=<session_id>&key=<key>",
+              all: "GET /session/all?id=<session_id>",
+              description:
+                "Auto-cleanup pattern. Session data deletes after 30 seconds of inactivity.",
             },
           },
         },

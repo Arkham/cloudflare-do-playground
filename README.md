@@ -136,6 +136,38 @@ done
 # {"error":"Rate limit exceeded","retry_after_ms":1}
 ```
 
+#### Location Example (In-Memory State)
+
+```bash
+# First request - location will be null
+curl http://localhost:8787/location
+
+# Second request (within a short time) - shows previous location
+curl http://localhost:8787/location
+
+# Wait several minutes, then request again - DO may be evicted and restarted
+# You'll see the first request message again
+```
+
+#### Session Example (Auto-Cleanup Pattern)
+
+```bash
+# Store session data
+curl -X POST http://localhost:8787/session/set?id=user123 \
+  -H "Content-Type: application/json" \
+  -d '{"key": "username", "value": "alice"}'
+
+# Get session data
+curl http://localhost:8787/session/get?id=user123&key=username
+
+# Get all session data
+curl http://localhost:8787/session/all?id=user123
+
+# Wait 30+ seconds without making requests, then check again
+# Session data will be automatically deleted
+curl http://localhost:8787/session/all?id=user123
+```
+
 ## Available Scripts
 
 - `npm run dev` - Start development server
@@ -356,6 +388,81 @@ This example demonstrates the Durable Object lifecycle:
 
 This is different from using `this.ctx.storage` which persists data across evictions. In-memory state is useful for temporary caching, connection pools, or stateful operations that don't need long-term persistence.
 
+### 6. Session (Auto-Cleanup Pattern)
+
+A session store demonstrating:
+
+- Auto-cleanup using alarms with a TTL pattern
+- Activity-based persistence (active = persists, inactive = auto-deletes)
+- Controlled data lifecycle management
+- Practical session management
+
+**Endpoints:**
+
+- `POST /session/set?id=<session_id>` - Store session data (JSON body: `{key, value}`)
+- `GET /session/get?id=<session_id>&key=<key>` - Retrieve session data
+- `GET /session/all?id=<session_id>` - Get all session data
+
+**How it works:**
+
+The Session Durable Object implements an auto-cleanup pattern using alarms:
+
+1. **Every request resets the TTL**: Each `fetch()` call sets an alarm for 30 seconds in the future
+2. **Activity extends the session**: If another request comes before the alarm fires, the alarm is **overwritten** with a new one
+3. **Inactivity triggers cleanup**: If no requests come for 30 seconds, the `alarm()` handler fires and calls `deleteAll()`
+
+**Example:**
+
+```bash
+# Store some session data
+curl -X POST http://localhost:8787/session/set?id=user123 \
+  -H "Content-Type: application/json" \
+  -d '{"key": "username", "value": "alice"}'
+
+curl -X POST http://localhost:8787/session/set?id=user123 \
+  -H "Content-Type: application/json" \
+  -d '{"key": "cart_items", "value": "3"}'
+
+# Retrieve specific key
+curl 'http://localhost:8787/session/get?id=user123&key=username'
+# Response: {"key":"username","value":"alice","exists":true,"ttl_seconds":30,...}
+
+# Get all session data
+curl http://localhost:8787/session/all?id=user123
+# Response: {"data":{"username":"alice","cart_items":"3"},"count":2,...}
+
+# Keep making requests within 30 seconds - session stays alive
+curl http://localhost:8787/session/all?id=user123  # Resets TTL
+# ... wait 15 seconds ...
+curl http://localhost:8787/session/all?id=user123  # Resets TTL again
+
+# Wait 30+ seconds without any requests, then check
+sleep 35
+curl http://localhost:8787/session/all?id=user123
+# Response: {"data":{},"count":0,...}  # All data auto-deleted!
+```
+
+**Key Concepts:**
+
+This pattern creates **activity-based persistence**:
+
+- **Active sessions** (receiving requests) = data persists indefinitely (alarm keeps resetting)
+- **Inactive sessions** (no requests) = data auto-deletes after TTL expires
+
+**Comparison with Location example:**
+
+- **Location (In-Memory State)**: Resets when Cloudflare evicts the DO from memory (you have no control)
+- **Session (Auto-Cleanup)**: You explicitly control when data is deleted based on inactivity (using persistent storage + alarms)
+
+**Common Use Cases:**
+
+1. **User sessions** - Auto-expire after inactivity
+2. **Shopping carts** - Clear abandoned carts after 30 minutes
+3. **Temporary caches** - Auto-clear stale cached data
+4. **Chat rooms** - Delete room data when everyone leaves
+5. **Rate limit windows** - Reset counters after inactivity
+6. **Cost optimization** - Automatically clean up storage you no longer need
+
 ## Creating New Durable Objects
 
 1. Create a new file in `packages/durable-objects/src/`:
@@ -394,7 +501,7 @@ script_name = "do-playground-worker"
 
 ```toml
 [[ migrations ]]
-tag = "v5"  # increment version from current (v4 is Location)
+tag = "v6"  # increment version from current (v5 is Session)
 new_sqlite_classes = ["MyDurableObject"]
 ```
 
@@ -407,6 +514,7 @@ export {
   Batcher,
   RateLimiter,
   Location,
+  Session,
   MyDurableObject,
 } from "durable-objects";
 ```
