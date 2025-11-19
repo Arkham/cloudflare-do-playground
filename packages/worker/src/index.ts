@@ -1,11 +1,18 @@
 import type { RateLimiter } from "durable-objects";
-export { Counter, ChatRoom, Batcher, RateLimiter } from "durable-objects";
+export {
+  Counter,
+  ChatRoom,
+  Batcher,
+  RateLimiter,
+  Location,
+} from "durable-objects";
 
 interface Env {
   COUNTER: DurableObjectNamespace;
   CHAT_ROOM: DurableObjectNamespace;
   BATCHER: DurableObjectNamespace;
   RATE_LIMITER: DurableObjectNamespace<RateLimiter>;
+  LOCATION: DurableObjectNamespace;
 }
 
 export default {
@@ -43,6 +50,13 @@ export default {
       return stub.fetch(request);
     }
 
+    // Route to Location Durable Object
+    if (url.pathname.startsWith("/location")) {
+      const id = env.LOCATION.idFromName("A");
+      const stub = env.LOCATION.get(id);
+      return stub.fetch(request);
+    }
+
     // Default response with usage instructions
     return new Response(
       JSON.stringify(
@@ -68,6 +82,11 @@ export default {
               check: "GET /rate-limit",
               description:
                 "Token bucket rate limiter based on client IP (10,000 token capacity, 1ms per request)",
+            },
+            location: {
+              check: "GET /location",
+              description:
+                "Demonstrates in-memory state. Tracks location across requests until DO is evicted from memory.",
             },
           },
         },

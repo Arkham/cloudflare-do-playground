@@ -145,7 +145,7 @@ done
 
 ## Durable Objects
 
-This playground includes four example Durable Objects:
+This playground includes the following Durable Objects:
 
 ### 1. Counter
 
@@ -301,6 +301,61 @@ static readonly milliseconds_for_updates = 5000;   // Refill interval
 static readonly capacity = 100;                  // Maximum tokens
 ```
 
+### 5. In-Memory State
+
+An in-memory state example demonstrating:
+
+- In-memory state that persists only while the Durable Object is active
+- Understanding Durable Object lifecycle and memory eviction
+- The difference between in-memory vs persistent storage
+
+**Endpoints:**
+
+- `GET /location` - Check and update location state
+
+**How it works:**
+
+The Location Durable Object tracks location across requests, but only in memory:
+
+- On the first request, `this.location` is `null` because the constructor was just called
+- Each request updates `this.location` with the current city from Cloudflare's edge data
+- If the Durable Object stays in memory, subsequent requests will see the previous location
+- When the Durable Object is evicted from memory due to inactivity, `this.location` resets to `null`
+
+**Example:**
+
+```bash
+# First request - location will be null
+curl http://localhost:8787/location
+
+# Response:
+# This is the first request, you called the constructor, so this.location was null.
+# You will set this.location to be your city: (San Francisco). Try reloading the page.
+
+# Second request (within a short time) - location will show previous value
+curl http://localhost:8787/location
+
+# Response:
+# The Durable Object was already loaded and running because it recently handled a request.
+#
+# Previous Location: San Francisco
+# New Location: San Francisco
+
+# Wait a while (several minutes), then request again - DO may be evicted and restarted
+# You'll see the first request message again with null location
+```
+
+**Key Concepts:**
+
+This example demonstrates the Durable Object lifecycle:
+
+1. **Constructor call**: Happens when the DO is created or loaded into memory
+2. **Memory retention**: While active, the DO stays in memory with state preserved
+3. **Eviction**: After prolonged inactivity, Cloudflare evicts the DO from memory
+4. **Recreation**: Next request after eviction triggers a new constructor call
+
+This is different from using `this.ctx.storage` which persists data across evictions. In-memory state is useful for temporary caching, connection pools, or stateful operations that don't need long-term persistence.
+
 ## Creating New Durable Objects
 
 1. Create a new file in `packages/durable-objects/src/`:
@@ -339,8 +394,8 @@ script_name = "do-playground-worker"
 
 ```toml
 [[ migrations ]]
-tag = "v4"  # increment version from current (v3 is RateLimiter)
-new_classes = ["MyDurableObject"]
+tag = "v5"  # increment version from current (v4 is Location)
+new_sqlite_classes = ["MyDurableObject"]
 ```
 
 5. Re-export in `packages/worker/src/index.ts`:
@@ -351,6 +406,7 @@ export {
   ChatRoom,
   Batcher,
   RateLimiter,
+  Location,
   MyDurableObject,
 } from "durable-objects";
 ```
