@@ -168,6 +168,19 @@ curl http://localhost:8787/session/all?id=user123
 curl http://localhost:8787/session/all?id=user123
 ```
 
+#### Streamer Example (Streaming Response Pattern)
+
+```bash
+# Request the stream endpoint (worker will collect 5 messages and cancel)
+curl http://localhost:8787/streamer/stream
+
+# Response after collecting 5 messages:
+# {"message":"Stream cancelled after 5 messages","values":["0","1","2","3","4"]}
+
+# Get info about the streamer
+curl http://localhost:8787/streamer
+```
+
 ## Available Scripts
 
 - `npm run dev` - Start development server
@@ -463,6 +476,107 @@ This pattern creates **activity-based persistence**:
 5. **Rate limit windows** - Reset counters after inactivity
 6. **Cost optimization** - Automatically clean up storage you no longer need
 
+### 7. Streamer (Streaming Response Pattern)
+
+A streaming response example demonstrating:
+
+- ReadableStream API for progressive data delivery
+- Async generators for incremental data production
+- Stream cancellation with AbortController/AbortSignal
+- Stream consumption and cancellation from the worker
+
+**Endpoints:**
+
+- `GET /streamer/stream` - Get a streaming response (worker cancels after 5 messages)
+- `GET /streamer` - Info endpoint
+
+**How it works:**
+
+The Streamer Durable Object demonstrates streaming responses:
+
+1. **Durable Object creates a stream**: The DO returns a ReadableStream that produces data incrementally
+2. **Async generator produces data**: An async generator yields values (incrementing counter) every second
+3. **Worker consumes the stream**: The worker reads from the stream progressively
+4. **Worker cancels the stream**: After collecting 5 messages, the worker calls `reader.cancel()`
+5. **Cancellation propagates**: The cancel signal propagates to the DO, stopping the async generator
+
+**Example:**
+
+```bash
+# Request the stream endpoint
+curl http://localhost:8787/streamer/stream
+
+# The worker will:
+# 1. Connect to the Streamer DO
+# 2. Start receiving streamed values (0, 1, 2, 3, 4)
+# 3. After 5 messages, cancel the stream
+# 4. Return collected values
+
+# Response:
+# {
+#   "message": "Stream cancelled after 5 messages",
+#   "values": ["0", "1", "2", "3", "4"]
+# }
+```
+
+**Key Concepts:**
+
+This pattern demonstrates **streaming responses with proper cancellation**:
+
+- **ReadableStream**: Allows progressive data delivery without buffering everything in memory
+- **AbortController**: Provides a way to cancel ongoing operations
+- **Stream cancellation**: When the consumer cancels, the producer is notified and can clean up
+
+**Comparison with other patterns:**
+
+- **Counter (Request-Response)**: Each request is independent, blocking until complete
+- **Streamer (Streaming)**: Single request, multiple progressive responses, can be cancelled mid-stream
+
+**Common Use Cases:**
+
+1. **Server-Sent Events (SSE)** - Push real-time notifications to clients
+2. **Large file processing** - Process and stream results chunk-by-chunk
+3. **Real-time data feeds** - Stock prices, sensor data, log streaming
+4. **Progressive rendering** - Stream HTML/JSON as it's generated
+5. **Long-running computations** - Stream results as they're computed
+6. **AI/LLM responses** - Stream tokens as they're generated (like ChatGPT)
+
+**Implementation Details:**
+
+The Durable Object:
+
+```typescript
+// Creates a ReadableStream from an async generator
+const stream = new ReadableStream({
+  async start(controller) {
+    for await (const value of dataSource(abortController.signal)) {
+      controller.enqueue(new TextEncoder().encode(String(value) + "\n"));
+    }
+  },
+  cancel() {
+    console.log("Stream cancelled by client");
+    abortController.abort();
+  },
+});
+```
+
+The Worker:
+
+```typescript
+// Consumes the stream and cancels after 5 messages
+const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+let i = 0;
+while (true) {
+  if (i >= 5) {
+    await reader.cancel(); // Propagates to DO's cancel() handler
+    break;
+  }
+  const { value, done } = await reader.read();
+  // ... process value ...
+  i++;
+}
+```
+
 ## Creating New Durable Objects
 
 1. Create a new file in `packages/durable-objects/src/`:
@@ -501,7 +615,7 @@ script_name = "do-playground-worker"
 
 ```toml
 [[ migrations ]]
-tag = "v6"  # increment version from current (v5 is Session)
+tag = "v7"  # increment version from current (v6 is Streamer)
 new_sqlite_classes = ["MyDurableObject"]
 ```
 
@@ -515,6 +629,7 @@ export {
   RateLimiter,
   Location,
   Session,
+  Streamer,
   MyDurableObject,
 } from "durable-objects";
 ```

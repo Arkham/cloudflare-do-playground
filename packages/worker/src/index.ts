@@ -6,6 +6,7 @@ export {
   RateLimiter,
   Location,
   Session,
+  Streamer,
 } from "durable-objects";
 
 interface Env {
@@ -15,6 +16,7 @@ interface Env {
   RATE_LIMITER: DurableObjectNamespace<RateLimiter>;
   LOCATION: DurableObjectNamespace;
   SESSION: DurableObjectNamespace;
+  STREAMER: DurableObjectNamespace;
 }
 
 export default {
@@ -67,6 +69,59 @@ export default {
       return stub.fetch(request);
     }
 
+    // Route to Streamer Durable Object
+    if (url.pathname.startsWith("/streamer")) {
+      const id = env.STREAMER.idFromName("default");
+      const stub = env.STREAMER.get(id);
+      const response = await stub.fetch(request);
+
+      // If not a stream response, just return it
+      if (!response.ok || !response.body) {
+        return response;
+      }
+
+      // Check if this is the stream endpoint
+      if (url.pathname === "/streamer/stream") {
+        // Consume the stream and cancel after 5 messages
+        const reader = response.body
+          .pipeThrough(new TextDecoderStream())
+          .getReader();
+
+        const data: string[] = [];
+        let i = 0;
+
+        while (true) {
+          // Cancel the stream after 5 messages
+          if (i >= 5) {
+            await reader.cancel();
+            break;
+          }
+
+          const { value, done } = await reader.read();
+
+          if (value) {
+            const trimmed = value.trim();
+            if (trimmed) {
+              console.log(`Got value: ${trimmed}`);
+              data.push(trimmed);
+              i++;
+            }
+          }
+
+          if (done) {
+            break;
+          }
+        }
+
+        return Response.json({
+          message: "Stream cancelled after 5 messages",
+          values: data,
+        });
+      }
+
+      return response;
+    }
+
     // Default response with usage instructions
     return new Response(
       JSON.stringify(
@@ -104,6 +159,11 @@ export default {
               all: "GET /session/all?id=<session_id>",
               description:
                 "Auto-cleanup pattern. Session data deletes after 30 seconds of inactivity.",
+            },
+            streamer: {
+              stream: "GET /streamer/stream",
+              description:
+                "Streaming response pattern. Streams incrementing counter values, worker cancels after 5 messages.",
             },
           },
         },
