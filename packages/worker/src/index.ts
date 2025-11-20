@@ -1,4 +1,7 @@
-import type { RateLimiter } from "durable-objects";
+import type {
+  RateLimiter,
+  MyDurableObject as MyDurableObjectType,
+} from "durable-objects";
 export {
   Counter,
   ChatRoom,
@@ -7,6 +10,8 @@ export {
   Location,
   Session,
   Streamer,
+  MyDurableObject,
+  RpcDO,
 } from "durable-objects";
 
 interface Env {
@@ -17,6 +22,7 @@ interface Env {
   LOCATION: DurableObjectNamespace;
   SESSION: DurableObjectNamespace;
   STREAMER: DurableObjectNamespace;
+  MY_DURABLE_OBJECT: DurableObjectNamespace<MyDurableObjectType>;
 }
 
 export default {
@@ -122,6 +128,38 @@ export default {
       return response;
     }
 
+    // Route to RPC Target Durable Object
+    if (url.pathname.startsWith("/rpc")) {
+      const id: DurableObjectId = env.MY_DURABLE_OBJECT.idFromName(
+        url.pathname
+      );
+      const stub = env.MY_DURABLE_OBJECT.get(id);
+
+      // Set the Durable Object metadata using the RpcTarget
+      // Notice that no await is needed here
+      const rpcTarget = stub.setMetaData(id.name ?? "default");
+
+      // Call the Durable Object method using the RpcTarget.
+      // The DO identifier is stored in the Durable Object's storage
+      const greeting = await rpcTarget.computeMessage("world");
+
+      // Call the Durable Object method that does not use the Durable Object identifier
+      const simpleGreeting = await rpcTarget.simpleGreeting("world");
+
+      // Get the initialization timestamp as a separate field
+      const initializedAt = await rpcTarget.getInitializedAt();
+
+      // Clean up the RpcTarget.
+      // Note: Symbol.dispose cleanup is handled automatically by the runtime
+      console.log("RpcTarget will be cleaned up automatically.");
+
+      return Response.json({
+        greeting,
+        simpleGreeting,
+        initializedAt,
+      });
+    }
+
     // Default response with usage instructions
     return new Response(
       JSON.stringify(
@@ -164,6 +202,11 @@ export default {
               stream: "GET /streamer/stream",
               description:
                 "Streaming response pattern. Streams incrementing counter values, worker cancels after 5 messages.",
+            },
+            rpc: {
+              greet: "GET /rpc",
+              description:
+                "RPC Target pattern. Demonstrates using RpcTarget to pass metadata and call DO methods without direct fetch.",
             },
           },
         },

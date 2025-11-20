@@ -38,6 +38,11 @@ name = "STREAMER"
 class_name = "Streamer"
 script_name = "do-playground-worker"
 
+[[ durable_objects.bindings ]]
+name = "MY_DURABLE_OBJECT"
+class_name = "MyDurableObject"
+script_name = "do-playground-worker"
+
 [[ migrations ]]
 tag = "v1"
 new_sqlite_classes = ["Counter", "ChatRoom"]
@@ -61,4 +66,8 @@ new_sqlite_classes = ["Session"]
 [[ migrations ]]
 tag = "v6"
 new_sqlite_classes = ["Streamer"]
+
+[[ migrations ]]
+tag = "v7"
+new_sqlite_classes = ["MyDurableObject"]
 

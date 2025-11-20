@@ -181,6 +181,25 @@ curl http://localhost:8787/streamer/stream
 curl http://localhost:8787/streamer
 ```
 
+#### RPC Target Example
+
+```bash
+# Call the RPC Target endpoint
+curl http://localhost:8787/rpc
+
+# Response:
+# {
+#   "greeting": "Hello, world! The identifier of this DO is /rpc",
+#   "simpleGreeting": "Hello, world! This doesn't use the DO identifier.",
+#   "initializedAt": "2024-01-15T10:30:45.123Z"
+# }
+
+# Call it again immediately - you'll see the SAME timestamp (DO is still in memory)
+curl http://localhost:8787/rpc
+
+# Wait several minutes, then call again - if the DO was evicted, you'll see a NEW timestamp
+```
+
 ## Available Scripts
 
 - `npm run dev` - Start development server
@@ -577,6 +596,162 @@ while (true) {
 }
 ```
 
+### 8. RPC Target (RpcTarget Pattern)
+
+An RPC Target example demonstrating:
+
+- Using `RpcTarget` to expose methods without HTTP fetch
+- Passing metadata and state between worker and Durable Object
+- Separating public API from internal implementation
+- Direct method invocation without HTTP overhead
+- Tracking Durable Object lifecycle with initialization timestamps
+
+**Endpoints:**
+
+- `GET /rpc` - Call Durable Object methods via RpcTarget
+
+**How it works:**
+
+The RPC Target pattern uses Cloudflare's `RpcTarget` class to enable direct method calls to Durable Objects without using the `fetch()` API:
+
+1. **RpcDO extends RpcTarget**: Create a class that extends `RpcTarget` and wraps the Durable Object
+2. **Metadata initialization**: The DO's `setMetaData()` method returns an `RpcDO` instance with stored context
+3. **Direct method calls**: The worker calls methods on the RpcTarget, which are forwarded to the DO
+4. **No await on initialization**: The RpcTarget is created without awaiting, enabling immediate method calls
+5. **Automatic cleanup**: The runtime handles cleanup of RpcTarget instances automatically
+
+**Example:**
+
+```bash
+# Call the RPC endpoint
+curl http://localhost:8787/rpc
+
+# Response:
+# {
+#   "greeting": "Hello, world! The identifier of this DO is /rpc",
+#   "simpleGreeting": "Hello, world! This doesn't use the DO identifier.",
+#   "initializedAt": "2024-01-15T10:30:45.123Z"
+# }
+
+# The initialization timestamp demonstrates when the DO constructor was called.
+# This timestamp will remain the same as long as the DO stays in memory.
+# If the DO is evicted and later recreated, you'll see a new timestamp.
+```
+
+**Key Concepts:**
+
+This pattern demonstrates **RPC-style communication with Durable Objects**:
+
+- **RpcTarget**: Enables method calls without HTTP overhead
+- **Metadata passing**: Store and pass context (like DO identifiers) between calls
+- **Selective exposure**: Only methods in the RpcTarget class are accessible from the worker
+- **Type safety**: Full TypeScript support for method signatures
+
+**Comparison with other patterns:**
+
+- **Counter (fetch API)**: Uses HTTP request/response cycle for all communication
+- **RPC Target**: Direct method invocation, bypassing HTTP serialization
+
+**Common Use Cases:**
+
+1. **Internal services** - When DO methods are called from workers, not external clients
+2. **Performance-critical paths** - Reduce overhead of HTTP serialization
+3. **Complex method signatures** - Pass rich objects without manual serialization
+4. **Microservices architecture** - Service-to-service communication
+5. **Stateful computations** - Pass context and state between calls efficiently
+
+**Implementation Details:**
+
+The RpcDO class (wraps the Durable Object):
+
+```typescript
+export class RpcDO extends RpcTarget {
+  constructor(private mainDo: MyDurableObject, private doIdentifier: string) {
+    super();
+  }
+
+  async computeMessage(userName: string) {
+    return this.mainDo.computeMessage(userName, this.doIdentifier);
+  }
+
+  async simpleGreeting(userName: string) {
+    return this.mainDo.simpleGreeting(userName);
+  }
+
+  async getInitializedAt() {
+    return this.mainDo.getInitializedAt();
+  }
+}
+```
+
+The Durable Object:
+
+```typescript
+export class MyDurableObject extends DurableObject {
+  private initializedAt: string;
+
+  constructor(ctx: DurableObjectState, env: any) {
+    super(ctx, env);
+    // Store the timestamp when this Durable Object was initialized
+    this.initializedAt = new Date().toISOString();
+    console.log(`Durable Object initialized at: ${this.initializedAt}`);
+  }
+
+  async setMetaData(doIdentifier: string) {
+    await this.ctx.storage.put("doIdentifier", doIdentifier);
+    return new RpcDO(this, doIdentifier);
+  }
+
+  async computeMessage(userName: string, doIdentifier: string) {
+    const storedIdentifier = await this.ctx.storage.get<string>("doIdentifier");
+    return `Hello, ${userName}! The identifier of this DO is ${doIdentifier}`;
+  }
+
+  async simpleGreeting(userName: string) {
+    return `Hello, ${userName}! This doesn't use the DO identifier.`;
+  }
+
+  async getInitializedAt() {
+    return this.initializedAt;
+  }
+}
+```
+
+The Worker:
+
+```typescript
+// Get Durable Object stub
+const id = env.MY_DURABLE_OBJECT.idFromName(url.pathname);
+const stub = env.MY_DURABLE_OBJECT.get(id);
+
+// Create RpcTarget (no await needed)
+const rpcTarget = stub.setMetaData(id.name ?? "default");
+
+// Call methods directly
+const greeting = await rpcTarget.computeMessage("world");
+const simpleGreeting = await rpcTarget.simpleGreeting("world");
+
+// Get the initialization timestamp as a separate field
+const initializedAt = await rpcTarget.getInitializedAt();
+
+// Cleanup is handled automatically by the runtime
+console.log("RpcTarget will be cleaned up automatically.");
+
+// Return structured response
+return Response.json({
+  greeting,
+  simpleGreeting,
+  initializedAt,
+});
+```
+
+**Benefits:**
+
+- **Less boilerplate**: No need to parse URLs, handle HTTP methods, or serialize/deserialize
+- **Type safety**: Method signatures are preserved, enabling IDE autocomplete and type checking
+- **Performance**: Reduced overhead compared to HTTP fetch
+- **Flexibility**: Mix public (fetch) and internal (RPC) APIs in the same DO
+
 ## Creating New Durable Objects
 
 1. Create a new file in `packages/durable-objects/src/`:
@@ -615,8 +790,8 @@ script_name = "do-playground-worker"
 
 ```toml
 [[ migrations ]]
-tag = "v7"  # increment version from current (v6 is Streamer)
-new_sqlite_classes = ["MyDurableObject"]
+tag = "v8"  # increment version from current (v7 is RPC Target/MyDurableObject)
+new_sqlite_classes = ["MyNewDurableObject"]
 ```
 
 5. Re-export in `packages/worker/src/index.ts`:

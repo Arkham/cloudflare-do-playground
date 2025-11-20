@@ -5,3 +5,4 @@ export { RateLimiter } from "./rate-limiter";
 export { Location } from "./location";
 export { Session } from "./session";
 export { Streamer } from "./streamer";
+export { MyDurableObject, RpcDO } from "./rpc-target";
