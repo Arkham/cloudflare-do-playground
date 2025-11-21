@@ -200,6 +200,27 @@ curl http://localhost:8787/rpc
 # Wait several minutes, then call again - if the DO was evicted, you'll see a NEW timestamp
 ```
 
+#### KV Store Example
+
+```bash
+# Write to KV
+curl -X PUT 'http://localhost:8787/kv-store/kv?room=my-room' \
+  -H "Content-Type: application/json" \
+  -d '{"key": "user:123", "value": "Alice"}'
+
+# Read from KV
+curl 'http://localhost:8787/kv-store/kv?room=my-room&key=user:123'
+
+# List keys with prefix
+curl 'http://localhost:8787/kv-store/list?room=my-room&prefix=user:&limit=10'
+
+# Get statistics
+curl 'http://localhost:8787/kv-store/stats?room=my-room'
+
+# Delete from KV
+curl -X DELETE 'http://localhost:8787/kv-store/kv?room=my-room&key=user:123'
+```
+
 ## Available Scripts
 
 - `npm run dev` - Start development server
@@ -751,6 +772,189 @@ return Response.json({
 - **Type safety**: Method signatures are preserved, enabling IDE autocomplete and type checking
 - **Performance**: Reduced overhead compared to HTTP fetch
 - **Flexibility**: Mix public (fetch) and internal (RPC) APIs in the same DO
+
+### 9. KV Store (Workers KV Integration)
+
+A KV integration example demonstrating:
+
+- Accessing Workers KV namespace from within a Durable Object
+- Using KV for high-performance read operations
+- Combining KV (distributed cache) with DO storage (transactional data)
+- Tracking metadata about KV operations in DO storage
+- Hybrid storage strategies
+
+**Endpoints:**
+
+- `PUT /kv-store/kv?room=<room_id>` - Write to KV (JSON body: `{key: string, value: string}`)
+- `GET /kv-store/kv?room=<room_id>&key=<key>` - Read from KV
+- `DELETE /kv-store/kv?room=<room_id>&key=<key>` - Delete from KV
+- `GET /kv-store/stats?room=<room_id>` - Get operation statistics
+- `GET /kv-store/list?room=<room_id>&prefix=<prefix>&limit=<limit>` - List keys with prefix
+
+**How it works:**
+
+The KVStore Durable Object demonstrates how to use Workers KV from within a Durable Object:
+
+1. **KV namespace binding**: The DO receives the KV namespace via its `env` parameter
+2. **Write operations**: Data is written to KV using `env.KV_CACHE.put()`
+3. **Read operations**: Data is read from KV using `env.KV_CACHE.get()`
+4. **Metadata tracking**: Operation counts and last accessed keys are tracked in DO storage
+5. **Hybrid storage**: Combines KV (fast reads) with DO storage (transactional writes)
+
+**Example:**
+
+```bash
+# Write a key-value pair to KV
+curl -X PUT 'http://localhost:8787/kv-store/kv?room=my-room' \
+  -H "Content-Type: application/json" \
+  -d '{"key": "user:123", "value": "Alice"}'
+
+# Response:
+# {
+#   "success": true,
+#   "message": "Wrote key \"user:123\" to KV",
+#   "write_count": 1
+# }
+
+# Write more data
+curl -X PUT 'http://localhost:8787/kv-store/kv?room=my-room' \
+  -H "Content-Type: application/json" \
+  -d '{"key": "user:456", "value": "Bob"}'
+
+curl -X PUT 'http://localhost:8787/kv-store/kv?room=my-room' \
+  -H "Content-Type: application/json" \
+  -d '{"key": "product:789", "value": "Laptop"}'
+
+# Read a value from KV
+curl 'http://localhost:8787/kv-store/kv?room=my-room&key=user:123'
+
+# Response:
+# {
+#   "key": "user:123",
+#   "value": "Alice",
+#   "found": true,
+#   "read_count": 1
+# }
+
+# List keys with a prefix
+curl 'http://localhost:8787/kv-store/list?room=my-room&prefix=user:&limit=10'
+
+# Response:
+# {
+#   "keys": ["user:123", "user:456"],
+#   "list_complete": true,
+#   "cursor": null,
+#   "count": 2
+# }
+
+# Get statistics about operations
+curl 'http://localhost:8787/kv-store/stats?room=my-room'
+
+# Response:
+# {
+#   "statistics": {
+#     "total_writes": 3,
+#     "total_reads": 1,
+#     "last_key_written": "product:789",
+#     "last_key_read": "user:123"
+#   },
+#   "note": "Statistics are tracked in Durable Object storage, while actual data is in KV"
+# }
+
+# Delete a key from KV
+curl -X DELETE 'http://localhost:8787/kv-store/kv?room=my-room&key=user:123'
+
+# Response:
+# {
+#   "success": true,
+#   "message": "Deleted key \"user:123\" from KV"
+# }
+```
+
+**Key Concepts:**
+
+This pattern demonstrates **combining Workers KV with Durable Objects**:
+
+- **KV namespace access**: DOs can access KV namespaces passed through the `env` parameter
+- **Complementary storage**: Use KV for read-heavy data, DO storage for write-heavy/transactional data
+- **Metadata tracking**: Track KV operations in DO storage for analytics and monitoring
+- **Multi-instance isolation**: Each DO instance (by room ID) can track its own statistics
+
+**Comparison with other patterns:**
+
+- **Counter (DO storage only)**: Uses only Durable Object storage for all data
+- **KV Store (Hybrid)**: Uses KV for data storage and DO storage for metadata/statistics
+
+**Common Use Cases:**
+
+1. **Caching layer** - Use KV as a fast read cache with DO coordinating cache invalidation
+2. **User sessions** - Store session data in KV, track active sessions in DO
+3. **Content distribution** - Cache rendered content in KV, manage updates through DO
+4. **Configuration management** - Store config in KV, update atomically through DO
+5. **Rate limiting with persistence** - Use DO for rate limiting logic, KV for allowlists/blocklists
+6. **Analytics aggregation** - Write raw events to KV, aggregate in DO, flush to external systems
+
+**Storage Strategy Comparison:**
+
+| Feature               | Workers KV                 | Durable Object Storage          |
+| --------------------- | -------------------------- | ------------------------------- |
+| **Read Performance**  | Very fast (edge-cached)    | Fast (but not edge-cached)      |
+| **Write Performance** | Eventually consistent      | Strongly consistent             |
+| **Read Cost**         | Free reads                 | Storage API charges             |
+| **Write Cost**        | Per write + storage        | Included in request cost        |
+| **Consistency**       | Eventually consistent      | Strong consistency              |
+| **Best For**          | Read-heavy, cacheable data | Write-heavy, transactional data |
+
+**Implementation Details:**
+
+The Durable Object receives the KV namespace binding:
+
+```typescript
+interface Env {
+  KV_CACHE: KVNamespace;
+}
+
+export class KVStore extends DurableObject<Env> {
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env);
+    // env.KV_CACHE is now available
+  }
+
+  async fetch(request: Request): Promise<Response> {
+    // Write to KV
+    await this.env.KV_CACHE.put("some-key", "some-value");
+
+    // Read from KV
+    const value = await this.env.KV_CACHE.get("some-key");
+
+    // Track metadata in DO storage
+    const writeCount = (await this.ctx.storage.get<number>("write_count")) || 0;
+    await this.ctx.storage.put("write_count", writeCount + 1);
+
+    return Response.json({ value });
+  }
+}
+```
+
+The Worker binds both the DO and KV namespace:
+
+```typescript
+interface Env {
+  KV_STORE: DurableObjectNamespace;
+  KV_CACHE: KVNamespace; // Same namespace passed to DO
+}
+
+export default {
+  async fetch(request: Request, env: Env): Promise<Response> {
+    const roomId = new URL(request.url).searchParams.get("room") || "default";
+    const id = env.KV_STORE.idFromName(roomId);
+    const stub = env.KV_STORE.get(id);
+
+    // The DO will have access to env.KV_CACHE
+    return stub.fetch(request);
+  },
+};
+```
 
 ## Creating New Durable Objects
 

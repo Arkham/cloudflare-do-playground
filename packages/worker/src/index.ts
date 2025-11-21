@@ -12,6 +12,7 @@ export {
   Streamer,
   MyDurableObject,
   RpcDO,
+  KVStore,
 } from "durable-objects";
 
 interface Env {
@@ -23,6 +24,8 @@ interface Env {
   SESSION: DurableObjectNamespace;
   STREAMER: DurableObjectNamespace;
   MY_DURABLE_OBJECT: DurableObjectNamespace<MyDurableObjectType>;
+  KV_STORE: DurableObjectNamespace;
+  KV_CACHE: KVNamespace;
 }
 
 export default {
@@ -128,6 +131,20 @@ export default {
       return response;
     }
 
+    // Route to KVStore Durable Object
+    if (url.pathname.startsWith("/kv-store")) {
+      const roomId = url.searchParams.get("room") || "default";
+      const id = env.KV_STORE.idFromName(roomId);
+      const stub = env.KV_STORE.get(id);
+
+      // Pass the request to the Durable Object, rewriting the path
+      // to remove the /kv-store prefix
+      const newUrl = new URL(request.url);
+      newUrl.pathname = newUrl.pathname.replace("/kv-store", "");
+
+      return stub.fetch(newUrl.toString(), request);
+    }
+
     // Route to RPC Target Durable Object
     if (url.pathname.startsWith("/rpc")) {
       const id: DurableObjectId = env.MY_DURABLE_OBJECT.idFromName(
@@ -207,6 +224,15 @@ export default {
               greet: "GET /rpc",
               description:
                 "RPC Target pattern. Demonstrates using RpcTarget to pass metadata and call DO methods without direct fetch.",
+            },
+            kvStore: {
+              put: "PUT /kv-store/kv?room=<room_id> (with JSON body {key: string, value: string})",
+              get: "GET /kv-store/kv?room=<room_id>&key=<key>",
+              delete: "DELETE /kv-store/kv?room=<room_id>&key=<key>",
+              stats: "GET /kv-store/stats?room=<room_id>",
+              list: "GET /kv-store/list?room=<room_id>&prefix=<prefix>&limit=<limit>",
+              description:
+                "Workers KV integration. Demonstrates accessing KV namespace from within a Durable Object.",
             },
           },
         },

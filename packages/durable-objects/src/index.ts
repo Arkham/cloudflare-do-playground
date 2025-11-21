@@ -6,3 +6,4 @@ export { Location } from "./location";
 export { Session } from "./session";
 export { Streamer } from "./streamer";
 export { MyDurableObject, RpcDO } from "./rpc-target";
+export { KVStore } from "./kv-store";
