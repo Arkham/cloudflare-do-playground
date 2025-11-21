@@ -10,13 +10,20 @@
     "dev": "npm run dev --workspace=worker",
     "deploy": "npm run deploy --workspace=worker",
     "type-check": "npm run type-check --workspaces --if-present",
-    "build": "npm run build --workspaces --if-present"
+    "build": "npm run build --workspaces --if-present",
+    "test:latency": "tsx scripts/test-latency.ts"
   },
-  "keywords": ["cloudflare", "durable-objects", "workers", "typescript"],
+  "keywords": [
+    "cloudflare",
+    "durable-objects",
+    "workers",
+    "typescript"
+  ],
   "author": "",
   "license": "MIT",
   "devDependencies": {
+    "@types/node": "^24.10.1",
+    "tsx": "^4.7.0",
     "typescript": "^5.3.3"
   }
 }
-

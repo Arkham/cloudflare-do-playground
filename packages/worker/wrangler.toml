@@ -6,8 +6,7 @@ compatibility_flags = ["nodejs_compat"]
 # KV Namespace for KVStore Durable Object example
 [[ kv_namespaces ]]
 binding = "KV_CACHE"
-id = "preview_id"
-preview_id = "preview_id"
+id = "09b26554bff341f4b797eb4dbec05411"
 
 [[ durable_objects.bindings ]]
 name = "COUNTER"
@@ -54,6 +53,11 @@ name = "KV_STORE"
 class_name = "KVStore"
 script_name = "do-playground-worker"
 
+[[ durable_objects.bindings ]]
+name = "LATENCY_TESTER"
+class_name = "LatencyTester"
+script_name = "do-playground-worker"
+
 [[ migrations ]]
 tag = "v1"
 new_sqlite_classes = ["Counter", "ChatRoom"]
@@ -85,4 +89,8 @@ new_sqlite_classes = ["MyDurableObject"]
 [[ migrations ]]
 tag = "v8"
 new_sqlite_classes = ["KVStore"]
+
+[[ migrations ]]
+tag = "v9"
+new_sqlite_classes = ["LatencyTester"]
 

@@ -227,6 +227,7 @@ curl -X DELETE 'http://localhost:8787/kv-store/kv?room=my-room&key=user:123'
 - `npm run deploy` - Deploy to Cloudflare Workers
 - `npm run type-check` - Run TypeScript type checking across all packages
 - `npm run build` - Build all packages
+- `npm run test:latency <worker-url> [requests]` - Run latency tests across all supported locations
 
 ## Durable Objects
 
@@ -955,6 +956,141 @@ export default {
   },
 };
 ```
+
+### 10. LatencyTester (Location Hints & Latency Testing)
+
+A latency testing example demonstrating:
+
+- Using location hints to control DO placement
+- Testing latency across different geographic regions
+- Fetching Cloudflare trace data to determine actual DO location
+- Automated testing across all supported locations
+- Understanding how location affects performance
+
+**Endpoints:**
+
+- `GET /latency-test?locationHint=<hint>&name=<base_name>` - Test latency with optional location hint
+
+**How it works:**
+
+The LatencyTester Durable Object demonstrates location hints for optimal DO placement:
+
+1. **Location hints**: Each location hint creates a **unique Durable Object** in the specified region
+2. **Trace data**: The DO fetches Cloudflare's `/cdn-cgi/trace` to report its actual data center
+3. **Latency measurement**: The worker measures round-trip time and processing time
+4. **Persistent location**: Once created, a DO stays in its location (doesn't move)
+
+**Example:**
+
+```bash
+# Test Eastern North America
+curl 'http://localhost:8787/latency-test?locationHint=enam'
+
+# Response:
+# {
+#   "trace": {
+#     "colo": "EWR",
+#     "loc": "US",
+#     ...
+#   },
+#   "processingTime": 45,
+#   "timestamp": "2025-11-21T12:34:56.789Z",
+#   "totalLatency": 123,
+#   "locationHint": "enam",
+#   "doName": "test-enam"
+# }
+
+# Test Western Europe
+curl 'http://localhost:8787/latency-test?locationHint=weur'
+
+# Test without location hint
+curl 'http://localhost:8787/latency-test'
+```
+
+**Supported Location Hints:**
+
+According to [Cloudflare's documentation](https://developers.cloudflare.com/durable-objects/reference/data-location/#provide-a-location-hint):
+
+- `wnam` - Western North America
+- `enam` - Eastern North America
+- `sam` - South America
+- `weur` - Western Europe
+- `eeur` - Eastern Europe
+- `apac` - Asia-Pacific
+- `oc` - Oceania
+- `afr` - Africa
+- `me` - Middle East
+
+**Automated Testing:**
+
+Run the included test script to benchmark all locations:
+
+```bash
+# Test with 50 requests per location (default)
+npm run test:latency https://your-worker.workers.dev
+
+# Test with custom number of requests
+npm run test:latency https://your-worker.workers.dev 100
+```
+
+The script will:
+- Create a unique DO for each of the 9 supported locations
+- Make N requests to each DO
+- Calculate average, min, and max latencies
+- Sort results by average latency
+- Report which colos (data centers) each DO is running in
+- Save detailed results to a JSON file
+
+**Example output:**
+
+```
+======================================================================
+RESULTS (sorted by average latency)
+======================================================================
+
+1. Eastern North America (enam)
+   Average Total Latency:  98.45ms
+   Min/Max Latency:        85ms / 125ms
+   Average Processing:     42.3ms
+   Network Latency:        56.15ms
+   Colos:                  EWR
+
+2. Western Europe (weur)
+   Average Total Latency:  145.67ms
+   Min/Max Latency:        130ms / 180ms
+   Average Processing:     43.1ms
+   Network Latency:        102.57ms
+   Colos:                  LHR, AMS
+...
+```
+
+**Key Concepts:**
+
+This pattern demonstrates **geographic optimization for Durable Objects**:
+
+- **Location hints are best effort**: Not guaranteed, but Cloudflare tries to place DOs optimally
+- **First call matters**: Location hint only respected on the first `get()` call for a DO
+- **Unique names per location**: Each location needs its own DO (we append location to name)
+- **Persistent placement**: DOs don't move after creation (dynamic relocation planned for future)
+
+**Use Cases:**
+
+1. **Optimizing global applications** - Determine which regions to target for your users
+2. **Understanding latency patterns** - See how distance affects response times
+3. **Capacity planning** - Decide where to pre-create DOs for best performance
+4. **Comparing locations** - Find the fastest region for your specific deployment
+5. **Debugging** - Verify that DOs are being created in expected locations
+
+**Best Practices:**
+
+1. **Don't pre-create DOs**: Let production traffic create them naturally, or use explicit location hints
+2. **Use representative locations**: Create DOs close to where your users are
+3. **Monitor over time**: Latency can vary, so test periodically
+4. **Consider jurisdictions**: For compliance (GDPR, FedRAMP), use [jurisdiction constraints](https://developers.cloudflare.com/durable-objects/reference/data-location/#restrict-durable-objects-to-a-jurisdiction) instead
+
+**Further Reading:**
+
+See [docs/LATENCY_TESTING.md](docs/LATENCY_TESTING.md) for detailed documentation and advanced usage.
 
 ## Creating New Durable Objects
 

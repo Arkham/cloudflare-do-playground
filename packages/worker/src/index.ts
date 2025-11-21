@@ -13,6 +13,7 @@ export {
   MyDurableObject,
   RpcDO,
   KVStore,
+  LatencyTester,
 } from "durable-objects";
 
 interface Env {
@@ -25,6 +26,7 @@ interface Env {
   STREAMER: DurableObjectNamespace;
   MY_DURABLE_OBJECT: DurableObjectNamespace<MyDurableObjectType>;
   KV_STORE: DurableObjectNamespace;
+  LATENCY_TESTER: DurableObjectNamespace;
   KV_CACHE: KVNamespace;
 }
 
@@ -145,6 +147,41 @@ export default {
       return stub.fetch(newUrl.toString(), request);
     }
 
+    // Route to LatencyTester Durable Object
+    if (url.pathname.startsWith("/latency-test")) {
+      const locationHint = url.searchParams.get("locationHint");
+      const baseName = url.searchParams.get("name") || "test";
+
+      // Create a unique DO name for each location hint
+      // This ensures each location gets its own DO instance
+      const doName = locationHint ? `${baseName}-${locationHint}` : baseName;
+
+      // Create the ID with the location-specific name
+      const id = env.LATENCY_TESTER.idFromName(doName);
+
+      // Get the stub with optional location hint
+      // The location hint is only respected on the first get() call
+      const stub = locationHint
+        ? env.LATENCY_TESTER.get(id, {
+            locationHint: locationHint as DurableObjectLocationHint,
+          })
+        : env.LATENCY_TESTER.get(id);
+
+      // Measure the full round-trip time
+      const startTime = Date.now();
+      const objectResponse = await stub.fetch(request);
+      const totalLatency = Date.now() - startTime;
+
+      const data = (await objectResponse.json()) as Record<string, unknown>;
+
+      return Response.json({
+        ...data,
+        totalLatency,
+        locationHint: locationHint || "none",
+        doName,
+      });
+    }
+
     // Route to RPC Target Durable Object
     if (url.pathname.startsWith("/rpc")) {
       const id: DurableObjectId = env.MY_DURABLE_OBJECT.idFromName(
@@ -233,6 +270,22 @@ export default {
               list: "GET /kv-store/list?room=<room_id>&prefix=<prefix>&limit=<limit>",
               description:
                 "Workers KV integration. Demonstrates accessing KV namespace from within a Durable Object.",
+            },
+            latencyTest: {
+              test: "GET /latency-test?locationHint=<hint>&name=<do_name>",
+              description:
+                "Latency testing. Tests DO latency with optional location hints (wnam, enam, sam, weur, eeur, apac, oc, afr, me).",
+              hints: [
+                "wnam - Western North America",
+                "enam - Eastern North America",
+                "sam - South America",
+                "weur - Western Europe",
+                "eeur - Eastern Europe",
+                "apac - Asia-Pacific",
+                "oc - Oceania",
+                "afr - Africa",
+                "me - Middle East",
+              ],
             },
           },
         },
